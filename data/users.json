@@ -1,0 +1,17 @@
+{
+  "718910310": {
+    "authorized": true,
+    "score": 3,
+    "currentGame": "Математическая задача",
+    "isWaitingForTaskDescription": false,
+    "tempTask": null,
+    "awaitingCommand": false,
+    "gameData": {
+      "correctAnswer": 49
+    },
+    "gamesPlayed": {
+      "Словесная головоломка": 1,
+      "Математическая задача": 3
+    }
+  }
+}

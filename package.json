@@ -1,0 +1,32 @@
+{
+  "name": "telegram-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "engines": {
+    "node": "18.x"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "games",
+    "mini-games",
+    "tasks"
+  ],
+  "author": "",
+  "license": "ISC",
+  "description": "Telegram bot with mini-games and tasks",
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "mongoose": "^7.5.0",
+    "node-telegram-bot-api": "^0.64.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

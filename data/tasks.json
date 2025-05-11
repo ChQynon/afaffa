@@ -1,0 +1,100 @@
+{
+  "718910310": [
+    {
+      "file_id": "AgACAgIAAxkBAAO5aCCbDQ9LO8npiyyibR3IAsQWquUAApr4MRsJuQFJx3xLKW2Ob48BAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Создай мем с этим изображением",
+      "category": "творческие"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAOfaCCaDMjOB-YJajyXh5vzgg9sXhoAApv4MRsJuQFJP1vHp08OujcBAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Опиши, что происходит на фото, в деталях",
+      "category": "интеллектуальные"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAO4aCCbDWVXBYyBtVe2BxDVpyqbkHEAAibwMRtLkAhJnXxK7wI8NlYBAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Опиши, что происходит на фото, в деталях",
+      "category": "интеллектуальные"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAPQaCCdWB0dOlR01WTGTgQ-BeFU1AkAAs3wMRuClJFKBLeqoEuncwIBAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Придумай историю по этому изображению",
+      "category": "творческие"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAPQaCCdWB0dOlR01WTGTgQ-BeFU1AkAAs3wMRuClJFKBLeqoEuncwIBAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Назови 5 похожих вещей на то, что изображено на фото",
+      "category": "интеллектуальные"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAPSaCCdWIcLoJ9wo1B-Fa72_CReYywAAs_wMRuClJFKofbUnVpiO1ABAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Сделай фото, имитирующее это изображение",
+      "category": "творческие"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAPTaCCdWAx03lGTJmwJZ4Wbncc9WJYAAtDwMRuClJFKpGOLLStivtgBAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Сделай комплимент тому, кто на фото",
+      "category": "социальные"
+    },
+    {
+      "file_id": "BAACAgIAAxkBAAPUaCCdWMvOysmy_kE3SZOxUxgoD9AAAixxAAKClJFK735k2VhSrx42BA",
+      "type": "video",
+      "description": "Создай мем с этим изображением",
+      "category": "творческие"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAPVaCCdWJtWwOJFubuMOwAB4spvXXOlAALR8DEbgpSRSvpmTXlv4PK3AQADAgADeQADNgQ",
+      "type": "photo",
+      "description": "Спой песню о том, что видишь на изображении",
+      "category": "творческие"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAPWaCCdWHSFAr9dwfK20LKoiQ7Gp1gAAtLwMRuClJFKdLavek7y_JIBAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Опиши, что происходит на фото, в деталях",
+      "category": "интеллектуальные"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAPXaCCdWHiezh3DzaOWOKP6HmJUKdIAAtPwMRuClJFKWgQK6o5TxVABAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Спой песню о том, что видишь на изображении",
+      "category": "творческие"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAPYaCCdWAYlSFSADd487C61FdnW6xMAAtTwMRuClJFKE3B3dI8_SswBAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Повтори звук, который мог бы издавать объект на фото",
+      "category": "развлечения"
+    },
+    {
+      "file_id": "BAACAgIAAxkBAAPZaCCdWM7_piJ5mFYtBsmqzOIEE2IAAnZzAAILveBIwcI2Nmdnf982BA",
+      "type": "video",
+      "description": "Назови 5 похожих вещей на то, что изображено на фото",
+      "category": "интеллектуальные"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAPaaCCdWKLOlNF4FV9s6Twa9AyGU3YAAk74MRtTi-lIz0bDeLYyDQYBAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Нарисуй то, что изображено на фото",
+      "category": "творческие"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAPbaCCdWNE8u-q8f490TvL_AkK2RcYAAk_4MRtTi-lIYPcHxKgwCsEBAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Спой песню о том, что видишь на изображении",
+      "category": "творческие"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAPcaCCdWMzsqPiaDWUabLYQfuju9r0AArjzMRsyEehI44yFySur5NYBAAMCAAN5AAM2BA",
+      "type": "photo",
+      "description": "Напиши короткое стихотворение об этом фото",
+      "category": "творческие"
+    }
+  ]
+}
