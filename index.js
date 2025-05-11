@@ -3,6 +3,9 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 
+// Определение режима работы (webhook или polling)
+const IS_PROD = process.env.NODE_ENV === 'production';
+
 // Bot configuration
 const BOT_TOKEN = process.env.BOT_TOKEN || '7914542986:AAEI3dVWnv1utpgMYKyd5v08KGrvjNyviOo';
 const SECRET_CODE = process.env.SECRET_CODE || 'nuras2316';
@@ -19,27 +22,36 @@ if (!fs.existsSync(DATA_DIR)) {
 
 // Environment variables
 const PORT = process.env.PORT || 3000;
-const URL = process.env.URL || 'https://your-app-url.vercel.app';
+const URL = process.env.URL || 'https://afaffa.vercel.app';
 
-// Express server for webhook
+// Initialize bot with appropriate mode
+let bot;
 const app = express();
 app.use(express.json());
 
-// Initialize bot with webhook
-const bot = new TelegramBot(BOT_TOKEN, {
-  webHook: {
-    port: PORT
-  }
-});
-
-// Set webhook
-bot.setWebHook(`${URL}/bot${BOT_TOKEN}`);
-
-// Webhook endpoint
-app.post(`/bot${BOT_TOKEN}`, (req, res) => {
-  bot.processUpdate(req.body);
-  res.sendStatus(200);
-});
+if (IS_PROD) {
+  // Webhook mode for production (Vercel)
+  bot = new TelegramBot(BOT_TOKEN, {
+    webHook: {
+      port: PORT
+    }
+  });
+  
+  // Set webhook only in production mode
+  bot.setWebHook(`${URL}/bot${BOT_TOKEN}`);
+  
+  // Webhook endpoint
+  app.post(`/bot${BOT_TOKEN}`, (req, res) => {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+  });
+  
+  console.log(`Starting bot in WEBHOOK mode`);
+} else {
+  // Polling mode for local development
+  bot = new TelegramBot(BOT_TOKEN, { polling: true });
+  console.log(`Starting bot in POLLING mode`);
+}
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -66,9 +78,17 @@ try {
 }
 
 // Save data to files periodically
-setInterval(() => {
+const saveInterval = setInterval(() => {
   saveDataToFiles();
 }, 5 * 60 * 1000);
+
+// Handle process exit to save data
+process.on('SIGINT', () => {
+  console.log('Saving data before exit...');
+  saveDataToFiles();
+  clearInterval(saveInterval);
+  process.exit(0);
+});
 
 // Save data to files
 function saveDataToFiles() {
@@ -199,23 +219,23 @@ bot.on('text', (msg) => {
     } else {
       bot.sendMessage(userId, 'Неверный код. Попробуйте еще раз:');
     }
-  }
-});
-
-// Score command
-bot.onText(/\/score/, (msg) => {
-  const userId = msg.from.id;
-  initUser(userId);
-  
-  if (!users[userId].authorized) {
-    bot.sendMessage(userId, 'Пожалуйста, авторизуйтесь с помощью команды /start');
     return;
   }
   
-  bot.sendMessage(userId, `Ваш текущий счет: ${users[userId].score} очков`);
+  // Handle game input
+  if (users[userId].currentGame) {
+    const gameHandler = users[userId].currentGame.handleInput;
+    if (gameHandler) {
+      gameHandler(userId, text);
+    }
+    return;
+  }
+  
+  // Other text messages
+  bot.sendMessage(userId, 'Используйте команду /play для начала игры или /help для получения справки.');
 });
 
-// Help command
+// Help command handler
 bot.onText(/\/help/, (msg) => {
   const userId = msg.from.id;
   initUser(userId);
@@ -225,24 +245,43 @@ bot.onText(/\/help/, (msg) => {
     return;
   }
   
-  let helpText = 'Доступные команды:\n';
-  helpText += '/start - запуск и ввод кода\n';
-  helpText += '/play - начать новую игру\n';
-  helpText += '/score - текущий счет\n';
-  helpText += '/help - эта справка\n';
-  helpText += '/menu - меню с кнопкой добавления задания\n';
-  helpText += '/reset - сброс счета\n';
-  helpText += '/myfiles - список добавленных заданий\n\n';
+  const helpText = 
+    '📋 *Список команд:*\n' +
+    '/play - начать случайную игру\n' +
+    '/stats - просмотр статистики\n' +
+    '/reset - сбросить счет\n' +
+    '/myfiles - список добавленных заданий\n\n' +
+    '🎮 *Мини-игры:*\n' + 
+    games.map((game, index) => `${index+1}. ${game.name} - ${game.description}`).join('\n');
   
-  helpText += 'Доступные игры:\n';
-  games.forEach(game => {
-    helpText += `- ${game.name}: ${game.description}\n`;
-  });
+  // Create menu with buttons
+  const keyboard = {
+    reply_markup: {
+      keyboard: [
+        [{ text: '📷 Добавить фото' }, { text: '🎬 Добавить видео' }],
+        [{ text: '🎲 Играть' }, { text: '📊 Статистика' }]
+      ],
+      resize_keyboard: true
+    }
+  };
   
-  bot.sendMessage(userId, helpText);
+  bot.sendMessage(userId, helpText, { parse_mode: 'Markdown', ...keyboard });
 });
 
-// Reset command
+// Stats command handler
+bot.onText(/\/stats/, (msg) => {
+  const userId = msg.from.id;
+  initUser(userId);
+  
+  if (!users[userId].authorized) {
+    bot.sendMessage(userId, 'Пожалуйста, авторизуйтесь с помощью команды /start');
+    return;
+  }
+  
+  showStatistics(userId);
+});
+
+// Reset command handler
 bot.onText(/\/reset/, (msg) => {
   const userId = msg.from.id;
   initUser(userId);
@@ -253,37 +292,14 @@ bot.onText(/\/reset/, (msg) => {
   }
   
   users[userId].score = 0;
-  bot.sendMessage(userId, 'Ваш счет сброшен до 0.');
+  users[userId].gamesPlayed = {};
+  users[userId].gamesWon = {};
   saveDataToFiles();
+  
+  bot.sendMessage(userId, 'Ваш счет и статистика сброшены до нуля.');
 });
 
-// Menu command with task categories
-bot.onText(/\/menu/, (msg) => {
-  const userId = msg.from.id;
-  initUser(userId);
-  
-  if (!users[userId].authorized) {
-    bot.sendMessage(userId, 'Пожалуйста, авторизуйтесь с помощью команды /start');
-    return;
-  }
-  
-  const keyboard = {
-    reply_markup: {
-      keyboard: [
-        ['📷 Добавить фото'],
-        ['🎬 Добавить видео'],
-        ['🎲 Играть'],
-        ['📊 Статистика']
-      ],
-      resize_keyboard: true,
-      one_time_keyboard: false
-    }
-  };
-  
-  bot.sendMessage(userId, 'Главное меню:', keyboard);
-});
-
-// My files command
+// My files command handler
 bot.onText(/\/myfiles/, (msg) => {
   const userId = msg.from.id;
   initUser(userId);
@@ -293,267 +309,480 @@ bot.onText(/\/myfiles/, (msg) => {
     return;
   }
   
-  if (tasksData[userId].length === 0) {
+  const userTasks = tasksData[userId] || [];
+  
+  if (userTasks.length === 0) {
     bot.sendMessage(userId, 'У вас нет добавленных заданий.');
     return;
   }
   
-  let message = 'Ваши добавленные задания:\n';
-  tasksData[userId].forEach((task, index) => {
-    const descriptionPreview = task.description 
-      ? (task.description.length > 30 ? task.description.substring(0, 30) + '...' : task.description)
-      : 'Без описания';
-    
-    message += `${index + 1}. ${descriptionPreview} (${task.type})\n`;
+  let message = '📁 *Ваши добавленные задания:*\n\n';
+  
+  userTasks.forEach((task, index) => {
+    const type = task.type === 'photo' ? '📷' : '🎬';
+    message += `${index + 1}. ${type} ${task.description || 'Без описания'}\n`;
   });
   
-  bot.sendMessage(userId, message);
+  bot.sendMessage(userId, message, { parse_mode: 'Markdown' });
 });
 
-// Handle menu buttons
-bot.on('text', (msg) => {
-  const userId = msg.from.id;
-  const text = msg.text;
+// Handle keyboard buttons
+bot.on('message', (msg) => {
+  if (!msg.text) return;
   
+  const userId = msg.from.id;
   initUser(userId);
   
   if (!users[userId].authorized) return;
   
-  if (text === '📷 Добавить фото') {
-    bot.sendMessage(userId, 'Отправьте фото, которое будет использоваться как задание.');
-  } 
-  else if (text === '🎬 Добавить видео') {
-    bot.sendMessage(userId, 'Отправьте видео, которое будет использоваться как задание.');
-  }
-  else if (text === '🎲 Играть') {
-    startRandomGame(userId);
-  }
-  else if (text === '📊 Статистика') {
-    showStatistics(userId);
+  switch (msg.text) {
+    case '📷 Добавить фото':
+      handleAddPhotoRequest(userId);
+      break;
+    case '🎬 Добавить видео':
+      handleAddVideoRequest(userId);
+      break;
+    case '🎲 Играть':
+      startRandomGame(userId);
+      break;
+    case '📊 Статистика':
+      showStatistics(userId);
+      break;
   }
 });
 
-// Handle photo upload
+// Handler for "Add Photo" button
+function handleAddPhotoRequest(userId) {
+  bot.sendMessage(userId, 'Отправьте фотографию для нового задания.');
+  users[userId].awaitingPhoto = true;
+  users[userId].awaitingVideo = false;
+}
+
+// Handler for "Add Video" button
+function handleAddVideoRequest(userId) {
+  bot.sendMessage(userId, 'Отправьте видео для нового задания.');
+  users[userId].awaitingPhoto = false;
+  users[userId].awaitingVideo = true;
+}
+
+// Photo handler
 bot.on('photo', (msg) => {
   const userId = msg.from.id;
   initUser(userId);
   
   if (!users[userId].authorized) return;
   
-  const fileId = msg.photo[msg.photo.length - 1].file_id;
-  const randomDescription = predefinedDescriptions[Math.floor(Math.random() * predefinedDescriptions.length)];
-  
-  tasksData[userId].push({ 
-    file_id: fileId, 
-    type: 'photo',
-    description: randomDescription.text,
-    category: randomDescription.category
-  });
-  
-  saveDataToFiles();
-  
-  bot.sendMessage(userId, `Фото сохранено с заданием: "${randomDescription.text}" ✅`);
+  if (users[userId].awaitingPhoto) {
+    users[userId].awaitingPhoto = false;
+    users[userId].tempTask = {
+      type: 'photo',
+      fileId: msg.photo[msg.photo.length - 1].file_id
+    };
+    
+    // Select random description from predefined list
+    const randomDescription = predefinedDescriptions[Math.floor(Math.random() * predefinedDescriptions.length)];
+    users[userId].tempTask.description = `${randomDescription.text} (${randomDescription.category})`;
+    
+    // Save the task
+    tasksData[userId].push(users[userId].tempTask);
+    saveDataToFiles();
+    
+    bot.sendMessage(userId, `✅ Фото добавлено с описанием: "${users[userId].tempTask.description}"`);
+    users[userId].tempTask = null;
+  }
 });
 
-// Handle video upload
+// Video handler
 bot.on('video', (msg) => {
   const userId = msg.from.id;
   initUser(userId);
   
   if (!users[userId].authorized) return;
   
-  const fileId = msg.video.file_id;
-  const randomDescription = predefinedDescriptions[Math.floor(Math.random() * predefinedDescriptions.length)];
+  if (users[userId].awaitingVideo) {
+    users[userId].awaitingVideo = false;
+    users[userId].tempTask = {
+      type: 'video',
+      fileId: msg.video.file_id
+    };
+    
+    // Select random description from predefined list
+    const randomDescription = predefinedDescriptions[Math.floor(Math.random() * predefinedDescriptions.length)];
+    users[userId].tempTask.description = `${randomDescription.text} (${randomDescription.category})`;
+    
+    // Save the task
+    tasksData[userId].push(users[userId].tempTask);
+    saveDataToFiles();
+    
+    bot.sendMessage(userId, `✅ Видео добавлено с описанием: "${users[userId].tempTask.description}"`);
+    users[userId].tempTask = null;
+  }
+});
+
+// Display statistics
+function showStatistics(userId) {
+  const user = users[userId];
   
-  tasksData[userId].push({ 
-    file_id: fileId, 
-    type: 'video',
-    description: randomDescription.text,
-    category: randomDescription.category
+  let message = '📊 *Ваша статистика:*\n\n';
+  message += `🏆 Общий счет: ${user.score}\n\n`;
+  
+  message += '🎮 *Игры:*\n';
+  let totalGames = 0;
+  let totalWins = 0;
+  
+  games.forEach(game => {
+    const played = user.gamesPlayed[game.name] || 0;
+    const won = user.gamesWon[game.name] || 0;
+    totalGames += played;
+    totalWins += won;
+    
+    if (played > 0) {
+      const winRate = played > 0 ? Math.round((won / played) * 100) : 0;
+      message += `${game.name}: ${won}/${played} (${winRate}% побед)\n`;
+    }
   });
   
-  saveDataToFiles();
+  if (totalGames === 0) {
+    message += 'Вы еще не сыграли ни одной игры.\n';
+  } else {
+    const totalWinRate = Math.round((totalWins / totalGames) * 100);
+    message += `\n📈 Общий процент побед: ${totalWinRate}%\n`;
+  }
   
-  bot.sendMessage(userId, `Видео сохранено с заданием: "${randomDescription.text}" ✅`);
-});
+  message += `\n📁 Добавлено заданий: ${tasksData[userId] ? tasksData[userId].length : 0}`;
+  
+  bot.sendMessage(userId, message, { parse_mode: 'Markdown' });
+}
 
 // Start a random game
 function startRandomGame(userId) {
-  const randomGame = games[Math.floor(Math.random() * games.length)];
-  users[userId].currentGame = randomGame.name;
+  const gameIndex = Math.floor(Math.random() * games.length);
+  const game = games[gameIndex];
   
-  if (!users[userId].gamesPlayed) {
-    users[userId].gamesPlayed = {};
-  }
-  
-  users[userId].gamesPlayed[randomGame.name] = (users[userId].gamesPlayed[randomGame.name] || 0) + 1;
-  
+  // Increment the played counter for this game
+  users[userId].gamesPlayed[game.name] = (users[userId].gamesPlayed[game.name] || 0) + 1;
   saveDataToFiles();
   
-  randomGame.play(userId);
+  // Start the game
+  game.play(userId);
 }
 
-// Show user statistics
-function showStatistics(userId) {
-  const userStats = users[userId];
-  const tasksCount = tasksData[userId] ? tasksData[userId].length : 0;
-  
-  let statsMessage = `📊 *Ваша статистика:*\n\n`;
-  statsMessage += `🏆 Очки: ${userStats.score}\n`;
-  statsMessage += `🎮 Заданий добавлено: ${tasksCount}\n`;
-  
-  if (userStats.gamesPlayed) {
-    statsMessage += `\n🎯 *Сыгранные игры:*\n`;
-    
-    const gameStats = {};
-    for (const game of Object.keys(userStats.gamesPlayed)) {
-      gameStats[game] = {
-        played: userStats.gamesPlayed[game],
-        wins: userStats.gamesWon && userStats.gamesWon[game] ? userStats.gamesWon[game] : 0
-      };
-      
-      statsMessage += `${game}: ${gameStats[game].wins}/${gameStats[game].played} побед\n`;
-    }
-  }
-  
-  bot.sendMessage(userId, statsMessage, { parse_mode: 'Markdown' });
-}
-
-// Handle game win
+// Handle win
 function handleWin(userId) {
-  users[userId].score += 1;
+  const user = users[userId];
+  const gameName = user.currentGame ? user.currentGame.name : 'Неизвестная игра';
   
-  if (!users[userId].gamesWon) {
-    users[userId].gamesWon = {};
-  }
+  // Increment score and win counter
+  user.score += 1;
+  user.gamesWon[gameName] = (user.gamesWon[gameName] || 0) + 1;
   
-  const currentGame = users[userId].currentGame;
-  if (currentGame) {
-    users[userId].gamesWon[currentGame] = (users[userId].gamesWon[currentGame] || 0) + 1;
-  }
+  // Clear current game
+  user.currentGame = null;
   
-  bot.sendMessage(userId, `Молодец! 🎉 Ты победил!\nТвой счет: ${users[userId].score}`);
-  
+  // Save updated data
   saveDataToFiles();
   
-  setTimeout(() => {
-    bot.sendMessage(userId, 'Начинаем новую игру! Для выхода в меню напишите /menu');
-    startRandomGame(userId);
-  }, 2000);
+  // Send win message with updated score
+  bot.sendMessage(userId, `🎉 Поздравляем! Вы выиграли!\n\n🏆 Ваш текущий счет: ${user.score}\n\nНапишите /play, чтобы сыграть снова.`);
 }
 
-// Handle game loss
+// Handle loss
 function handleLoss(userId) {
-  const randomStaticTask = staticTasks[Math.floor(Math.random() * staticTasks.length)];
+  const user = users[userId];
   
-  const keyboard = {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: 'Я выполнил задание ✅', callback_data: 'task_completed' }],
-        [{ text: 'Пропустить ⏭️', callback_data: 'task_skip' }]
-      ]
+  // Clear current game
+  user.currentGame = null;
+  
+  // Choose a task
+  let task;
+  
+  // First check if user has custom tasks
+  if (tasksData[userId] && tasksData[userId].length > 0) {
+    // 50% chance to get custom task, 50% chance to get static task
+    if (Math.random() < 0.5) {
+      const randomIndex = Math.floor(Math.random() * tasksData[userId].length);
+      task = tasksData[userId][randomIndex];
     }
-  };
+  }
   
-  bot.sendMessage(
-    userId, 
-    `Проиграл! 😢 Теперь выполни это задание:\n\n${randomStaticTask.emoji} ${randomStaticTask.text}`,
-    keyboard
-  );
+  // If no custom task selected, use static task
+  if (!task) {
+    const randomIndex = Math.floor(Math.random() * staticTasks.length);
+    task = staticTasks[randomIndex];
+  }
+  
+  if (task.type === 'photo') {
+    // Send photo task
+    bot.sendPhoto(userId, task.fileId, {
+      caption: `😢 Вы проиграли! Ваше задание:\n\n${task.description}`,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '⏭️ Пропустить задание', callback_data: 'skip_task' }]
+        ]
+      }
+    });
+  } else if (task.type === 'video') {
+    // Send video task
+    bot.sendVideo(userId, task.fileId, {
+      caption: `😢 Вы проиграли! Ваше задание:\n\n${task.description}`,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '⏭️ Пропустить задание', callback_data: 'skip_task' }]
+        ]
+      }
+    });
+  } else {
+    // Send text task
+    bot.sendMessage(userId, `😢 Вы проиграли! Ваше задание:\n\n${task.emoji} ${task.text}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '⏭️ Пропустить задание', callback_data: 'skip_task' }]
+        ]
+      }
+    });
+  }
+  
+  saveDataToFiles();
 }
 
-// Handle task completion
+// Skip task callback
 bot.on('callback_query', (query) => {
   const userId = query.from.id;
-  const data = query.data;
   
-  if (data === 'task_completed') {
-    bot.answerCallbackQuery(query.id, { text: 'Отлично! Задание выполнено!' });
-    bot.sendMessage(userId, 'Хорошо! Продолжаем игру.');
-    
-    setTimeout(() => {
-      bot.sendMessage(userId, 'Начинаем новую игру! Для выхода в меню напишите /menu');
-      startRandomGame(userId);
-    }, 1000);
-  }
-  else if (data === 'task_skip') {
-    bot.answerCallbackQuery(query.id, { text: 'Задание пропущено' });
-    bot.sendMessage(userId, 'Задание пропущено. Продолжаем игру.');
-    
-    setTimeout(() => {
-      bot.sendMessage(userId, 'Начинаем новую игру! Для выхода в меню напишите /menu');
-      startRandomGame(userId);
-    }, 1000);
+  if (query.data === 'skip_task') {
+    bot.answerCallbackQuery(query.id, { text: 'Задание пропущено!' });
+    bot.sendMessage(userId, 'Задание пропущено! Напишите /play, чтобы сыграть снова.');
   }
 });
 
 // Game: Guess Number
 function playGuessNumber(userId) {
   const correctNumber = Math.floor(Math.random() * 10) + 1;
-  users[userId].gameData = { correctNumber };
   
-  const keyboard = {
+  bot.sendMessage(userId, '🔢 *Угадай число*\n\nЯ загадал число от 1 до 10. Попробуйте угадать!', {
+    parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
-        [1, 2, 3, 4, 5].map(num => ({ text: num.toString(), callback_data: `guess_${num}` })),
-        [6, 7, 8, 9, 10].map(num => ({ text: num.toString(), callback_data: `guess_${num}` }))
+        [
+          { text: '1', callback_data: 'guess_1' },
+          { text: '2', callback_data: 'guess_2' },
+          { text: '3', callback_data: 'guess_3' },
+          { text: '4', callback_data: 'guess_4' },
+          { text: '5', callback_data: 'guess_5' }
+        ],
+        [
+          { text: '6', callback_data: 'guess_6' },
+          { text: '7', callback_data: 'guess_7' },
+          { text: '8', callback_data: 'guess_8' },
+          { text: '9', callback_data: 'guess_9' },
+          { text: '10', callback_data: 'guess_10' }
+        ]
       ]
     }
+  });
+  
+  users[userId].currentGame = {
+    name: 'Угадай число',
+    correctNumber: correctNumber
   };
   
-  bot.sendMessage(userId, 'Угадай число от 1 до 10:', keyboard);
+  // Set up callback handler
+  bot.on('callback_query', (query) => {
+    const userId = query.from.id;
+    const gameData = users[userId].currentGame;
+    
+    if (!gameData || gameData.name !== 'Угадай число') return;
+    
+    if (query.data.startsWith('guess_')) {
+      const guess = parseInt(query.data.split('_')[1]);
+      
+      bot.answerCallbackQuery(query.id);
+      
+      if (guess === gameData.correctNumber) {
+        handleWin(userId);
+      } else {
+        bot.sendMessage(userId, `Неверно! Правильное число было: ${gameData.correctNumber}`);
+        handleLoss(userId);
+      }
+    }
+  });
 }
 
 // Game: Safe Button
 function playSafeButton(userId) {
   const safeButton = Math.floor(Math.random() * 3) + 1;
-  users[userId].gameData = { safeButton };
   
-  const keyboard = {
+  bot.sendMessage(userId, '💣 *Найди безопасную кнопку*\n\nОдна из кнопок безопасна, остальные - опасны. Выберите правильную!', {
+    parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
-        [1, 2, 3].map(num => ({ text: `Кнопка ${num}`, callback_data: `button_${num}` }))
+        [
+          { text: '1️⃣', callback_data: 'safe_1' },
+          { text: '2️⃣', callback_data: 'safe_2' },
+          { text: '3️⃣', callback_data: 'safe_3' }
+        ]
       ]
     }
+  });
+  
+  users[userId].currentGame = {
+    name: 'Найди безопасную кнопку',
+    safeButton: safeButton
   };
   
-  bot.sendMessage(userId, 'Найдите безопасную кнопку из трех вариантов:', keyboard);
+  // Set up callback handler
+  bot.on('callback_query', (query) => {
+    const userId = query.from.id;
+    const gameData = users[userId].currentGame;
+    
+    if (!gameData || gameData.name !== 'Найди безопасную кнопку') return;
+    
+    if (query.data.startsWith('safe_')) {
+      const choice = parseInt(query.data.split('_')[1]);
+      
+      bot.answerCallbackQuery(query.id);
+      
+      if (choice === gameData.safeButton) {
+        handleWin(userId);
+      } else {
+        bot.sendMessage(userId, `Бум! 💥 Это была опасная кнопка! Безопасной была кнопка ${gameData.safeButton}.`);
+        handleLoss(userId);
+      }
+    }
+  });
 }
 
 // Game: Find Bomb
 function playFindBomb(userId) {
-  const bombIndex = Math.floor(Math.random() * 6);
-  users[userId].gameData = { bombIndex };
+  const bombPosition = Math.floor(Math.random() * 9) + 1;
   
-  const keyboard = {
-    reply_markup: {
-      inline_keyboard: [
-        [0, 1, 2].map(idx => ({ text: '❓', callback_data: `bomb_${idx}` })),
-        [3, 4, 5].map(idx => ({ text: '❓', callback_data: `bomb_${idx}` }))
-      ]
-    }
-  };
-  
-  bot.sendMessage(userId, 'Найди бомбу! Выбери ячейку:', keyboard);
-}
-
-// Game: Rock-Paper-Scissors
-function playRockPaperScissors(userId) {
-  users[userId].gameData = {};
-  
-  const keyboard = {
+  bot.sendMessage(userId, '💣 *Найди бомбу*\n\nВ одной из ячеек спрятана бомба. Найдите ее!', {
+    parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
         [
-          { text: '✊ Камень', callback_data: 'rps_rock' },
-          { text: '✂️ Ножницы', callback_data: 'rps_scissors' },
-          { text: '📄 Бумага', callback_data: 'rps_paper' }
+          { text: '1️⃣', callback_data: 'bomb_1' },
+          { text: '2️⃣', callback_data: 'bomb_2' },
+          { text: '3️⃣', callback_data: 'bomb_3' }
+        ],
+        [
+          { text: '4️⃣', callback_data: 'bomb_4' },
+          { text: '5️⃣', callback_data: 'bomb_5' },
+          { text: '6️⃣', callback_data: 'bomb_6' }
+        ],
+        [
+          { text: '7️⃣', callback_data: 'bomb_7' },
+          { text: '8️⃣', callback_data: 'bomb_8' },
+          { text: '9️⃣', callback_data: 'bomb_9' }
         ]
       ]
     }
+  });
+  
+  users[userId].currentGame = {
+    name: 'Найди бомбу',
+    bombPosition: bombPosition
   };
   
-  bot.sendMessage(userId, 'Камень, ножницы или бумага?', keyboard);
+  // Set up callback handler
+  bot.on('callback_query', (query) => {
+    const userId = query.from.id;
+    const gameData = users[userId].currentGame;
+    
+    if (!gameData || gameData.name !== 'Найди бомбу') return;
+    
+    if (query.data.startsWith('bomb_')) {
+      const choice = parseInt(query.data.split('_')[1]);
+      
+      bot.answerCallbackQuery(query.id);
+      
+      if (choice === gameData.bombPosition) {
+        bot.sendMessage(userId, `Бомба найдена! 💣 Поздравляем!`);
+        handleWin(userId);
+      } else {
+        bot.sendMessage(userId, `Мимо! Бомба была в ячейке ${gameData.bombPosition}.`);
+        handleLoss(userId);
+      }
+    }
+  });
+}
+
+// Game: Rock Paper Scissors
+function playRockPaperScissors(userId) {
+  bot.sendMessage(userId, '✂️ *Камень, ножницы, бумага*\n\nСделайте ваш выбор!', {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '👊 Камень', callback_data: 'rps_rock' },
+          { text: '✌️ Ножницы', callback_data: 'rps_scissors' },
+          { text: '✋ Бумага', callback_data: 'rps_paper' }
+        ]
+      ]
+    }
+  });
+  
+  users[userId].currentGame = {
+    name: 'Камень, ножницы, бумага'
+  };
+  
+  // Set up callback handler
+  bot.on('callback_query', (query) => {
+    const userId = query.from.id;
+    const gameData = users[userId].currentGame;
+    
+    if (!gameData || gameData.name !== 'Камень, ножницы, бумага') return;
+    
+    if (query.data.startsWith('rps_')) {
+      const playerChoice = query.data.split('_')[1];
+      const choices = ['rock', 'paper', 'scissors'];
+      const botChoice = choices[Math.floor(Math.random() * 3)];
+      
+      bot.answerCallbackQuery(query.id);
+      
+      const playerEmoji = getEmojiForRPS(playerChoice);
+      const botEmoji = getEmojiForRPS(botChoice);
+      
+      const result = determineRPSWinner(playerChoice, botChoice);
+      
+      bot.sendMessage(userId, `Вы: ${playerEmoji}\nБот: ${botEmoji}\n\n${result}`);
+      
+      if (result === 'Вы выиграли! 🎉') {
+        handleWin(userId);
+      } else if (result === 'Вы проиграли! 😢') {
+        handleLoss(userId);
+      } else {
+        // It's a tie, play again
+        bot.sendMessage(userId, 'Ничья! Попробуйте еще раз.');
+        playRockPaperScissors(userId);
+      }
+    }
+  });
+}
+
+function determineRPSWinner(playerChoice, botChoice) {
+  if (playerChoice === botChoice) {
+    return 'Ничья! 🤝';
+  }
+  
+  if (
+    (playerChoice === 'rock' && botChoice === 'scissors') ||
+    (playerChoice === 'paper' && botChoice === 'rock') ||
+    (playerChoice === 'scissors' && botChoice === 'paper')
+  ) {
+    return 'Вы выиграли! 🎉';
+  } else {
+    return 'Вы проиграли! 😢';
+  }
+}
+
+function getEmojiForRPS(choice) {
+  switch (choice) {
+    case 'rock': return '👊 Камень';
+    case 'paper': return '✋ Бумага';
+    case 'scissors': return '✌️ Ножницы';
+    default: return choice;
+  }
 }
 
 // Game: Math Problem
@@ -561,161 +790,95 @@ function playMathProblem(userId) {
   const operations = ['+', '-', '*'];
   const operation = operations[Math.floor(Math.random() * operations.length)];
   
-  let num1, num2, correctAnswer;
+  let num1, num2, answer;
   
-  switch(operation) {
+  switch (operation) {
     case '+':
       num1 = Math.floor(Math.random() * 50) + 1;
       num2 = Math.floor(Math.random() * 50) + 1;
-      correctAnswer = num1 + num2;
+      answer = num1 + num2;
       break;
     case '-':
-      num1 = Math.floor(Math.random() * 50) + 26;
-      num2 = Math.floor(Math.random() * 25) + 1;
-      correctAnswer = num1 - num2;
+      num1 = Math.floor(Math.random() * 50) + 51; // Ensure larger number
+      num2 = Math.floor(Math.random() * 50) + 1;
+      answer = num1 - num2;
       break;
     case '*':
       num1 = Math.floor(Math.random() * 10) + 1;
       num2 = Math.floor(Math.random() * 10) + 1;
-      correctAnswer = num1 * num2;
+      answer = num1 * num2;
       break;
   }
   
-  users[userId].gameData = { correctAnswer };
-  
-  const options = [correctAnswer];
-  while(options.length < 4) {
-    const wrongAnswer = correctAnswer + (Math.floor(Math.random() * 10) - 5);
-    if (wrongAnswer !== correctAnswer && !options.includes(wrongAnswer) && wrongAnswer > 0) {
-      options.push(wrongAnswer);
+  // Generate 3 wrong answers
+  let answers = [answer];
+  while (answers.length < 4) {
+    let wrongAnswer = answer + (Math.floor(Math.random() * 10) - 5); // +/- 5
+    if (wrongAnswer !== answer && !answers.includes(wrongAnswer) && wrongAnswer > 0) {
+      answers.push(wrongAnswer);
     }
   }
   
-  const shuffledOptions = options.sort(() => Math.random() - 0.5);
+  // Shuffle answers
+  answers = shuffleArray(answers);
   
-  const keyboard = {
+  // Create inline keyboard with answers
+  const keyboard = [];
+  for (let i = 0; i < 4; i += 2) {
+    keyboard.push([
+      { text: answers[i].toString(), callback_data: `math_${answers[i]}` },
+      { text: (i+1 < 4) ? answers[i+1].toString() : "", callback_data: (i+1 < 4) ? `math_${answers[i+1]}` : "math_none" }
+    ]);
+  }
+  
+  bot.sendMessage(userId, `🧮 *Математическая задача*\n\nРешите пример: ${num1} ${operation} ${num2} = ?`, {
+    parse_mode: 'Markdown',
     reply_markup: {
-      inline_keyboard: [
-        shuffledOptions.slice(0, 2).map(num => ({ text: num.toString(), callback_data: `math_${num}` })),
-        shuffledOptions.slice(2, 4).map(num => ({ text: num.toString(), callback_data: `math_${num}` }))
-      ]
+      inline_keyboard: keyboard
     }
+  });
+  
+  users[userId].currentGame = {
+    name: 'Математическая задача',
+    answer: answer
   };
   
-  bot.sendMessage(userId, `Решите: ${num1} ${operation} ${num2} = ?`, keyboard);
+  // Set up callback handler
+  bot.on('callback_query', (query) => {
+    const userId = query.from.id;
+    const gameData = users[userId].currentGame;
+    
+    if (!gameData || gameData.name !== 'Математическая задача') return;
+    
+    if (query.data.startsWith('math_')) {
+      const userAnswer = parseInt(query.data.split('_')[1]);
+      
+      bot.answerCallbackQuery(query.id);
+      
+      if (userAnswer === gameData.answer) {
+        handleWin(userId);
+      } else {
+        bot.sendMessage(userId, `Неверно! Правильный ответ: ${gameData.answer}`);
+        handleLoss(userId);
+      }
+    }
+  });
 }
 
-// Helper function for RPS
-function getEmojiForRPS(choice) {
-  switch(choice) {
-    case 'rock': return '✊ Камень';
-    case 'paper': return '📄 Бумага';
-    case 'scissors': return '✂️ Ножницы';
-    default: return choice;
+// Helper function to shuffle array
+function shuffleArray(array) {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
   }
+  return newArray;
 }
 
-// Handle game callbacks
-bot.on('callback_query', (query) => {
-  const userId = query.from.id;
-  const data = query.data;
-  
-  if (!users[userId] || !users[userId].authorized) {
-    bot.answerCallbackQuery(query.id, { text: 'Сначала авторизуйтесь!' });
-    return;
-  }
-  
-  if (data.startsWith('guess_')) {
-    const guess = parseInt(data.split('_')[1]);
-    const correct = users[userId].gameData.correctNumber;
-    
-    bot.answerCallbackQuery(query.id);
-    
-    if (guess === correct) {
-      handleWin(userId);
-    } else {
-      bot.sendMessage(userId, `Неверно! Правильный ответ: ${correct}`);
-      handleLoss(userId);
-    }
-  }
-  
-  else if (data.startsWith('button_')) {
-    const choice = parseInt(data.split('_')[1]);
-    const safe = users[userId].gameData.safeButton;
-    
-    bot.answerCallbackQuery(query.id);
-    
-    if (choice === safe) {
-      handleWin(userId);
-    } else {
-      bot.sendMessage(userId, `Неверно! Безопасная кнопка была: ${safe}`);
-      handleLoss(userId);
-    }
-  }
-  
-  else if (data.startsWith('bomb_')) {
-    const choice = parseInt(data.split('_')[1]);
-    const bomb = users[userId].gameData.bombIndex;
-    
-    bot.answerCallbackQuery(query.id);
-    
-    if (choice === bomb) {
-      bot.sendMessage(userId, 'Бомба найдена! 💣');
-      handleWin(userId);
-    } else {
-      bot.sendMessage(userId, 'Бомба не найдена! 💥');
-      handleLoss(userId);
-    }
-  }
-  
-  else if (data.startsWith('rps_')) {
-    const userChoice = data.split('_')[1];
-    const options = ['rock', 'paper', 'scissors'];
-    const botChoice = options[Math.floor(Math.random() * options.length)];
-    
-    bot.answerCallbackQuery(query.id);
-    
-    let resultMessage = `Ты выбрал: ${getEmojiForRPS(userChoice)}, Я выбрал: ${getEmojiForRPS(botChoice)}. `;
-    
-    if (
-      (userChoice === 'rock' && botChoice === 'scissors') ||
-      (userChoice === 'scissors' && botChoice === 'paper') ||
-      (userChoice === 'paper' && botChoice === 'rock')
-    ) {
-      resultMessage += 'Ты победил!';
-      bot.sendMessage(userId, resultMessage);
-      handleWin(userId);
-    } else if (userChoice === botChoice) {
-      resultMessage += 'Ничья! Попробуй еще раз.';
-      bot.sendMessage(userId, resultMessage);
-      setTimeout(() => {
-        playRockPaperScissors(userId);
-      }, 1000);
-    } else {
-      resultMessage += 'Я победил!';
-      bot.sendMessage(userId, resultMessage);
-      handleLoss(userId);
-    }
-  }
-  
-  else if (data.startsWith('math_')) {
-    const answer = parseInt(data.split('_')[1]);
-    const correct = users[userId].gameData.correctAnswer;
-    
-    bot.answerCallbackQuery(query.id);
-    
-    if (answer === correct) {
-      bot.sendMessage(userId, `Верно! ${correct} - правильный ответ!`);
-      handleWin(userId);
-    } else {
-      bot.sendMessage(userId, `Неверно! Правильный ответ: ${correct}`);
-      handleLoss(userId);
-    }
-  }
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Webhook URL: ${URL}/bot${BOT_TOKEN}`);
-}); 
+// Start server if in production mode
+if (IS_PROD) {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`Webhook URL: ${URL}/bot${BOT_TOKEN}`);
+  });
+} 
